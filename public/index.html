@@ -1,0 +1,348 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Multiplayer Tic Tac Toe</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+         :root {
+            --bg: #0f172a;
+            --card: #0b1220;
+            --accent: #06b6d4;
+            --muted: #94a3b8;
+            --win: #10b981;
+        }
+        
+        * {
+            box-sizing: border-box;
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+        }
+        
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(180deg, #071126 0%, #041026 100%);
+            color: #e6eef6;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        
+        .card {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+            width: 520px;
+            max-width: 100%;
+            border-radius: 14px;
+            padding: 20px;
+            box-shadow: 0 8px 30px rgba(2, 6, 23, 0.6);
+        }
+        
+        h1 {
+            margin: 0 0 8px;
+            font-size: 20px
+        }
+        
+        .meta {
+            color: var(--muted);
+            font-size: 13px;
+            margin-bottom: 14px;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+        
+        button {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            padding: 10px 12px;
+            border-radius: 8px;
+            color: inherit;
+            cursor: pointer;
+            font-weight: 600;
+            backdrop-filter: blur(6px);
+        }
+        
+        button.primary {
+            background: linear-gradient(90deg, var(--accent), #3b82f6);
+            border: none;
+            color: #022;
+            box-shadow: 0 6px 18px rgba(6, 182, 212, 0.12)
+        }
+        
+        .board {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 18px 0;
+        }
+        
+        .cell {
+            aspect-ratio: 1/1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.02);
+            font-size: 40px;
+            border-radius: 10px;
+            cursor: pointer;
+            user-select: none;
+            transition: transform .12s
+        }
+        
+        .cell:hover {
+            transform: translateY(-4px)
+        }
+        
+        .info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 8px;
+        }
+        
+        .small {
+            font-size: 13px;
+            color: var(--muted);
+        }
+        
+        .status {
+            font-weight: 700;
+        }
+        
+        .overlay {
+            position: fixed;
+            left: 0;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+        
+        .notice {
+            background: var(--card);
+            padding: 14px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            box-shadow: 0 10px 30px rgba(2, 6, 23, 0.7)
+        }
+        
+        .hidden {
+            display: none
+        }
+        
+        .winner {
+            color: var(--win)
+        }
+        
+        @media (max-width:520px) {
+            .card {
+                padding: 14px
+            }
+            .cell {
+                font-size: 30px
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h1>Multiplayer Tic Tac Toe</h1>
+        <div class="meta">Play real-time vs a friend — open this page in two browser windows (or share URL on your LAN).</div>
+
+        <div class="controls">
+            <button id="findBtn" class="primary">Find Match</button>
+            <button id="restartBtn">Restart</button>
+            <button id="leaveBtn">Leave Queue</button>
+        </div>
+
+        <div class="statusRow" style="display:flex;justify-content:space-between;align-items:center">
+            <div class="small">You: <span id="youSymbol">-</span></div>
+            <div class="status" id="statusText">Not connected</div>
+            <div class="small">Turn: <span id="turnText">-</span></div>
+        </div>
+
+        <div class="board" id="board">
+            <!-- 9 cells inserted by JS -->
+        </div>
+
+        <div class="info">
+            <div class="small">Room: <span id="roomId">-</span></div>
+            <div class="small">Opponent: <span id="opponent">-</span></div>
+        </div>
+    </div>
+
+    <div id="modal" class="overlay hidden">
+        <div class="notice" id="modalContent"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        let mySymbol = null;
+        let roomId = null;
+        let boardState = Array(9).fill(null);
+        const boardEl = document.getElementById('board');
+        const findBtn = document.getElementById('findBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const leaveBtn = document.getElementById('leaveBtn');
+        const youSymbol = document.getElementById('youSymbol');
+        const statusText = document.getElementById('statusText');
+        const turnText = document.getElementById('turnText');
+        const roomIdEl = document.getElementById('roomId');
+        const opponentEl = document.getElementById('opponent');
+        const modal = document.getElementById('modal');
+        const modalContent = document.getElementById('modalContent');
+
+        // build board
+        for (let i = 0; i < 9; i++) {
+            const c = document.createElement('div');
+            c.className = 'cell';
+            c.dataset.index = i;
+            c.addEventListener('click', onCellClick);
+            boardEl.appendChild(c);
+        }
+
+        function renderBoard() {
+            const cells = boardEl.children;
+            for (let i = 0; i < 9; i++) {
+                cells[i].textContent = boardState[i] || '';
+            }
+        }
+
+        function onCellClick(e) {
+            const idx = Number(e.currentTarget.dataset.index);
+            if (!roomId) {
+                showModal('You are not in a match. Click Find Match.');
+                return;
+            }
+            if (!mySymbol) return;
+            // disable clicking if not your turn handled server-side but we also check UI
+            if (turnText.textContent !== mySymbol) {
+                showModal('Not your turn');
+                return;
+            }
+            if (boardState[idx] !== null) return;
+            socket.emit('playMove', {
+                roomId,
+                index: idx
+            });
+        }
+
+        findBtn.addEventListener('click', () => {
+            socket.emit('joinQueue');
+            statusText.textContent = 'Searching for match...';
+        });
+
+        restartBtn.addEventListener('click', () => {
+            if (!roomId) {
+                showModal('You are not in a match to restart.');
+                return;
+            }
+            socket.emit('restart', {
+                roomId
+            });
+        });
+
+        leaveBtn.addEventListener('click', () => {
+            socket.emit('leaveQueue');
+            statusText.textContent = 'Left queue';
+        });
+
+        // socket listeners
+        socket.on('waiting', () => {
+            statusText.textContent = 'Waiting for opponent...';
+        });
+
+        socket.on('start', (data) => {
+            roomId = data.roomId;
+            roomIdEl.textContent = roomId;
+            // find your symbol from mapping
+            mySymbol = data.symbol[socket.id] || (data.symbol ? data.symbol[socket.id] : null);
+            // On some browser setups socket.id may not be available here (older socket.io handshake timing),
+            // so try to infer: the server also emits start to both with the mapping - we attempt to pick accordingly
+            if (!mySymbol) {
+                // fallback: if mapping exists, check keys for this client's ID
+                for (const id in data.symbol) {
+                    if (id === socket.id) mySymbol = data.symbol[id];
+                }
+            }
+            // If still missing, set from object values: assume two players, client can infer by checking which player id isn't itself.
+            // But typically socket.id exists and mapping works.
+            youSymbol.textContent = mySymbol || '-';
+            boardState = Array(9).fill(null);
+            renderBoard();
+            statusText.textContent = 'Match found';
+            turnText.textContent = data.turn;
+            opponentEl.textContent = 'Connected';
+        });
+
+        socket.on('movePlayed', ({
+            board,
+            turn
+        }) => {
+            boardState = board;
+            renderBoard();
+            turnText.textContent = turn;
+            statusText.textContent = 'Playing...';
+        });
+
+        socket.on('gameOver', ({
+            winner,
+            board
+        }) => {
+            boardState = board;
+            renderBoard();
+            if (winner) {
+                statusText.innerHTML = winner === mySymbol ? '<span class="winner">You won!</span>' : '<span class="winner">You lost</span>';
+            } else {
+                statusText.textContent = 'Draw';
+            }
+            turnText.textContent = '-';
+        });
+
+        socket.on('restarted', ({
+            board,
+            turn
+        }) => {
+            boardState = board;
+            renderBoard();
+            statusText.textContent = 'Game restarted';
+            turnText.textContent = turn;
+        });
+
+        socket.on('opponentLeft', () => {
+            statusText.textContent = 'Opponent left';
+            opponentEl.textContent = 'Disconnected';
+            turnText.textContent = '-';
+            roomId = null;
+            mySymbol = null;
+            youSymbol.textContent = '-';
+            showModal('Opponent disconnected. You can Find Match again.');
+        });
+
+        socket.on('connect', () => {
+            // when reconnected
+            // ensure UI cleared
+            statusText.textContent = 'Connected';
+        });
+
+        function showModal(text) {
+            modalContent.textContent = text;
+            modal.classList.remove('hidden');
+            setTimeout(() => modal.classList.add('hidden'), 2200);
+        }
+
+        // close modal on click
+        modal.addEventListener('click', () => modal.classList.add('hidden'));
+    </script>
+</body>
+
+</html>
